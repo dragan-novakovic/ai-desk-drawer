@@ -2,88 +2,64 @@ import FreeCAD as App
 import FreeCADGui as Gui
 import Part
 
-doc = App.newDocument("DeskMountingBrackets")
+# --- CONFIGURATION (Adjust for your specific desk) ---
+h = 80.0        # Total drop height
+w = 60.0        # Width (widened slightly for better stability)
+d_top = 50.0    # Depth of the top mounting plate
+t = 8.0         # Thickness (increased for maximum stiffness)
+g_size = 45.0   # Height/Depth of the triangle supports
+g_thick = 6.0   # Thickness of the support ribs
+hole_r = 2.7    # Hole radius (approx 5.5mm diameter for a standard screw)
 
-# Dimensions (in mm)
-bracket_length = 450        # Length along desk
-bracket_width = 40          # Width of mounting surface
-bracket_thickness = 3       # Metal thickness
-mounting_flange_height = 30 # Height of vertical flange for slide attachment
-slide_offset = 15           # Distance from desk edge
+def create_fixed_bracket():
+    # Setup Document
+    doc = App.activeDocument()
+    if not doc:
+        doc = App.newDocument("Fixed_Slider_Bracket")
 
-# Create left mounting bracket
-# Horizontal mounting plate (attaches to underside of desk)
-left_horizontal = Part.makeBox(bracket_width, bracket_length, bracket_thickness)
-
-# Vertical flange (for drawer slide attachment)
-left_vertical = Part.makeBox(bracket_thickness, bracket_length, mounting_flange_height)
-left_vertical.translate(App.Vector(bracket_width - bracket_thickness, 0, -mounting_flange_height))
-
-# Combine
-left_bracket = left_horizontal.fuse(left_vertical)
-
-# Create right mounting bracket (mirror of left)
-right_horizontal = Part.makeBox(bracket_width, bracket_length, bracket_thickness)
-right_vertical = Part.makeBox(bracket_thickness, bracket_length, mounting_flange_height)
-right_vertical.translate(App.Vector(0, 0, -mounting_flange_height))
-
-right_bracket = right_horizontal.fuse(right_vertical)
-right_bracket.translate(App.Vector(600, 0, 0))  # Position on opposite side
-
-# Screw holes for mounting to desk (on horizontal plates)
-screw_diameter = 5  # M5 screws for desk mounting
-desk_screw_positions = [
-    # Left bracket holes
-    (10, 50, 0),
-    (30, 50, 0),
-    (10, bracket_length / 2, 0),
-    (30, bracket_length / 2, 0),
-    (10, bracket_length - 50, 0),
-    (30, bracket_length - 50, 0),
-]
-
-# Add screw holes to left bracket
-for x, y, z in desk_screw_positions:
-    hole = Part.makeCylinder(screw_diameter / 2, bracket_thickness * 2)
-    hole.translate(App.Vector(x, y, -bracket_thickness / 2))
-    left_bracket = left_bracket.cut(hole)
-
-# Add screw holes to right bracket (mirrored)
-for x, y, z in desk_screw_positions:
-    hole = Part.makeCylinder(screw_diameter / 2, bracket_thickness * 2)
-    hole.translate(App.Vector(600 + x, y, -bracket_thickness / 2))
-    right_bracket = right_bracket.cut(hole)
-
-# Screw holes for drawer slides (on vertical flanges)
-slide_screw_positions = [
-    (50,),
-    (150,),
-    (250,),
-    (350,),
-]
-
-for (y,) in slide_screw_positions:
-    # Left bracket slide holes
-    hole_left = Part.makeCylinder(screw_diameter / 2, bracket_thickness * 2)
-    hole_left.rotate(App.Vector(bracket_width - bracket_thickness, y, -mounting_flange_height / 2), App.Vector(0, 1, 0), 90)
-    hole_left.translate(App.Vector(bracket_width - bracket_thickness * 1.5, 0, 0))
-    left_bracket = left_bracket.cut(hole_left)
+    # 1. Main L-Shape Body
+    top_plate = Part.makeBox(w, d_top, t)
+    side_plate = Part.makeBox(w, t, h)
+    side_plate.translate(App.Vector(0, 0, -h + t))
     
-    # Right bracket slide holes
-    hole_right = Part.makeCylinder(screw_diameter / 2, bracket_thickness * 2)
-    hole_right.rotate(App.Vector(600, y, -mounting_flange_height / 2), App.Vector(0, 1, 0), 90)
-    hole_right.translate(App.Vector(600 - bracket_thickness / 2, 0, 0))
-    right_bracket = right_bracket.cut(hole_right)
+    # 2. Outer-Edge Reinforcement Gussets
+    # Create the triangle face
+    p1 = App.Vector(0, t, 0)
+    p2 = App.Vector(0, g_size, 0)
+    p3 = App.Vector(0, t, -g_size)
+    rib_face = Part.Face(Part.makePolygon([p1, p2, p3, p1]))
+    
+    # Left rib (Flush with the left edge)
+    rib_left = rib_face.extrude(App.Vector(g_thick, 0, 0))
+    rib_left.translate(App.Vector(0, 0, t))
+    
+    # Right rib (Flush with the right edge)
+    rib_right = rib_face.extrude(App.Vector(g_thick, 0, 0))
+    rib_right.translate(App.Vector(w - g_thick, 0, t))
 
-# Combine both brackets
-brackets = left_bracket.fuse(right_bracket)
+    # Fuse the structural parts together
+    body = top_plate.fuse(side_plate).fuse(rib_left).fuse(rib_right)
 
-# Create the object in FreeCAD
-obj = doc.addObject("Part::Feature", "MountingBrackets")
-obj.Shape = brackets
+    # 3. Single Central Holes
+    # Top Mounting Hole (Centered)
+    h_top = Part.makeCylinder(hole_r, t + 2, App.Vector(w/2, d_top/2, -1))
+    
+    # Side Slider Hole (Centered)
+    h_side = Part.makeCylinder(hole_r, t + 2, App.Vector(w/2, t + 1, -h/2))
+    h_side.rotate(App.Vector(w/2, 0, -h/2), App.Vector(1, 0, 0), 90)
 
-# Set color to metal gray
-Gui.ActiveDocument.getObject(obj.Name).ShapeColor = (0.7, 0.7, 0.75)
+    # Final Boolean Cut to make the holes
+    final_part = body.cut(h_top).cut(h_side)
 
-doc.recompute()
-Gui.SendMsgToActiveView("ViewFit")
+    # 4. Push to Gui
+    obj = doc.addObject("Part::Feature", "Clean_Bracket")
+    obj.Shape = final_part
+    
+    doc.recompute()
+    
+    # Adjust the camera to see the result
+    Gui.activeDocument().activeView().viewAxometric()
+    Gui.SendMsgToActiveView("ViewFit")
+    print("Bracket Fixed: Supports moved to edges, central hole cleared.")
+
+create_fixed_bracket()
